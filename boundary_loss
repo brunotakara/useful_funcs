@@ -6,27 +6,30 @@ import numpy as np
 import tensorflow as tf
 from scipy.ndimage import distance_transform_edt as distance
 
-
+# seg deve estar no formato np.array
 def calc_dist_map(seg):
     res = np.zeros_like(seg)
-    posmask = seg.astype(np.bool)
+    posmask = seg.astype(bool)
 
     if posmask.any():
         negmask = ~posmask
         res = distance(negmask) * negmask - (distance(posmask) - 1) * posmask
+        # O termo -1 em distance(posmask) deixa a contagem de pixels em relação até a borda da segmentação e não o BG, que precisa diminuir 1 pixel de distância em relação ao BG, já que a distância da borda até ela mesma é de 0
 
+    # Termo res: os valores positivos mostram a distância euclidiana (em pixels) do BG até a borda, enquanto que os termos negativos mostram a distância euclidiana do pixel segmentado até a borda da segmentação
     return res
 
-
 def calc_dist_map_batch(y_true):
-    y_true_numpy = y_true.numpy()
+    y_true_numpy = y_true.numpy()  # Aparentemente é a mesma coisa que np.array(y_true), e transforma tensor em array
     return np.array([calc_dist_map(y)
                      for y in y_true_numpy]).reshape(y_true.shape).astype(np.float32)
 
+# Para definir uma nova função para o tensorflow tem que usar y_true (y_train em forma de tensor) e o y_pred (output do modelo)
 
 def surface_loss_keras(y_true, y_pred):
     y_true_dist_map = tf.py_function(func=calc_dist_map_batch,
                                      inp=[y_true],
                                      Tout=tf.float32)
+    # multipled vai pegar os pixels falsos positivos (y_pred = 1) multiplicado pela distância até a borda, não vai considerar os falsos negativos (y_pred = 0), e negativar a loss com os acertos (y_pred = 1 e y_true_dist_map < 0, desconsiderando a borda)
     multipled = y_pred * y_true_dist_map
     return K.mean(multipled)
