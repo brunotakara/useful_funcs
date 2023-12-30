@@ -18,3 +18,8 @@ class DiceLoss(tf.keras.losses.Loss):
             y_pred ** self.gama) + tf.reduce_sum(y_true ** self.gama) + self.smooth
         result = 1 - tf.divide(nominator, denominator)
         return result
+
+# Adicionar Dice com Focal Loss
+
+
+
