@@ -1,0 +1,23 @@
+# From: https://github.com/FrancoisPorcher/awesome-ai-tutorials/blob/main/Computer%20Vision/001%20-%20unet/unet.ipynb
+
+# Modelo para o colab, quando fizer o do VSCode coloco um outro código
+
+
+from google.colab import drive
+drive.mount('/content/drive',force_remount=True)
+
+import sys
+import os
+import glob
+import random
+import time
+
+import numpy as np
+import pandas as pd
+
+import cv2
+import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import ImageGrid
+
+allpaths = glob.glob('drive/MyDrive/PPGTIG/VCML/D7torch/FLAIRmask/*')
+
