@@ -21,3 +21,449 @@ from mpl_toolkits.axes_grid1 import ImageGrid
 
 allpaths = glob.glob('drive/MyDrive/PPGTIG/VCML/D7torch/FLAIRmask/*')
 
+
+# Considerando que o data_prep já foi realizado para criar o arquivo csv
+
+df = pd.read_csv("gdrive/MyDrive/PPGTIG/VCML/D7torch/flairdata", index_col=0)
+
+
+sample_tumor_index = df[df["diagnosis"] == 1].sample(1).index
+sample_sane_index = df[df["diagnosis"] == 0].sample(1).index
+
+tumor_image_path = df.iloc[sample_tumor_index]["image_path"].values[0]
+sane_image_path = df.iloc[sample_sane_index]["image_path"].values[0]
+tumor_mask_path = df.iloc[sample_tumor_index]["mask_path"].values[0]
+sane_mask_path = df.iloc[sample_sane_index]["mask_path"].values[0]
+
+
+# Visualizador
+import matplotlib.pyplot as plt
+import cv2
+
+# Define the image paths
+paths = [tumor_image_path, tumor_mask_path, sane_image_path, sane_mask_path]
+
+# Create a 2x2 subplot
+fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+
+# Iterate over each subplot
+for i, ax in enumerate(axs.flat):
+    # Read the image
+    img = cv2.imread(paths[i])/255
+
+    # Convert the image from BGR to RGB
+    # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    # Display the image
+    ax.imshow(img)
+
+    # Set the title
+    if i == 0:
+        ax.set_title('Tumor Image')
+    elif i == 1:
+        ax.set_title('Tumor Mask')
+    elif i == 2:
+        ax.set_title('Sane Image')
+    else:
+        ax.set_title('Sane Mask')
+
+# Display the plot
+plt.tight_layout()
+plt.show()
+
+
+# Data Generator
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
+from sklearn.model_selection import train_test_split
+
+
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print(device)
+
+class BrainMriDataset(Dataset):
+    def __init__(self, df, transforms):
+        # df contains the paths to all files
+        self.df = df
+        # transforms is the set of data augmentation operations we use
+        self.transforms = transforms
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        image = cv2.imread(self.df.iloc[idx, 1])
+        mask = cv2.imread(self.df.iloc[idx, 2], 0)/255
+
+        augmented = self.transforms(image=image,
+                                    mask=mask)
+
+        image = augmented['image'] # Dimension (3, 255, 255)
+        mask = augmented['mask']   # Dimension (255, 255)
+
+        # We notice that the image has one more dimension (3 color channels), so we have to one one "artificial" dimension to the mask to match it
+        mask = np.expand_dims(mask, axis=0) # Dimension (1, 255, 255)
+
+        return image, mask
+
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+from functools import partial
+
+
+PATCH_SIZE = 128 # or 256
+
+def proportional_normalize(image_array, *args, **kwargs):
+    # Normaliza proporcionalmente entre 0 e 1
+    normalized_array = (image_array - np.min(image_array)) / (np.max(image_array) - np.min(image_array))
+    return normalized_array
+
+strong_transforms = A.Compose([
+    A.RandomResizedCrop(width = PATCH_SIZE, height = PATCH_SIZE, p=1.0),
+    A.HorizontalFlip(p=0.5),
+    A.VerticalFlip(p=0.5),
+    A.RandomRotate90(p=0.5),
+    A.Transpose(p=0.5),
+    A.ShiftScaleRotate(shift_limit=0.01, scale_limit=0.04, rotate_limit=0, p=0.25),
+
+    # Pixels
+    A.RandomBrightnessContrast(p=0.5),
+    A.RandomGamma(p=0.25),
+    A.Emboss(p=0.25),  # replaced A.IAAEmboss with A.Emboss
+    A.Blur(p=0.01, blur_limit = 3),
+
+    # Affine
+    A.OneOf([
+        A.ElasticTransform(p=0.5, alpha=120, sigma=120 * 0.05, alpha_affine=120 * 0.03),
+        A.GridDistortion(p=0.5),
+        A.OpticalDistortion(p=1, distort_limit=2, shift_limit=0.5)
+    ], p=0.8),
+
+    A.Normalize(p=1.0),
+    A.Lambda(image=proportional_normalize),
+    ToTensorV2(),
+])
+
+transforms = A.Compose([
+    A.Resize(width = PATCH_SIZE, height = PATCH_SIZE, p=1.0),
+    A.HorizontalFlip(p=0.5),
+    A.VerticalFlip(p=0.5),
+    A.RandomRotate90(p=0.5),
+    A.Transpose(p=0.5),
+    A.ShiftScaleRotate(shift_limit=0.01, scale_limit=0.04, rotate_limit=0, p=0.25),
+
+    A.Normalize(p=1.0),
+    A.Lambda(image=proportional_normalize),
+    ToTensorV2(),
+])
+
+
+# Split df into train_df and val_df
+train_df, val_df = train_test_split(df, stratify=df.diagnosis, test_size=0.1)
+train_df = train_df.reset_index(drop=True)
+val_df = val_df.reset_index(drop=True)
+
+# Split train_df into train_df and test_df
+train_df, test_df = train_test_split(train_df, stratify=train_df.diagnosis, test_size=0.15)
+train_df = train_df.reset_index(drop=True)
+
+#train_df = train_df[:1000]
+print(f"Train: {train_df.shape} \nVal: {val_df.shape} \nTest: {test_df.shape}")
+
+train_dataset = BrainMriDataset(train_df, transforms)
+image, mask = train_dataset[0]  # get the first item
+print(image.shape, mask.shape)
+print(image, mask)
+
+train_dataset = BrainMriDataset(train_df, transforms=transforms)
+train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+
+val_dataset = BrainMriDataset(val_df, transforms=transforms)
+val_dataloader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+
+test_dataset = BrainMriDataset(test_df, transforms=transforms)
+test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+
+# Get a batch of training data
+images, masks = next(iter(train_dataloader))
+
+print(f'Images batch shape: {images.shape}')
+print(f'Masks batch shape: {masks.shape}')
+
+# Optionally, visualize an image and mask from this batch
+import matplotlib.pyplot as plt
+
+# Assuming the images are in the PyTorch format (batch_size, channels, height, width)
+# and they are single channel (grayscale), you can use the following
+
+def double_conv(in_channels, out_channels):
+    return nn.Sequential(
+        nn.Conv2d(in_channels, out_channels, 3, padding=1),
+        nn.ReLU(inplace=True),
+        nn.Conv2d(out_channels, out_channels, 3, padding=1),
+        nn.ReLU(inplace=True))
+
+class UNet(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+        # Define convolutional layers
+        # These are used in the "down" path of the U-Net,
+        # where the image is successively downsampled
+        self.conv_down1 = double_conv(3, 64)
+        self.conv_down2 = double_conv(64, 128)
+        self.conv_down3 = double_conv(128, 256)
+        self.conv_down4 = double_conv(256, 512)
+
+        # Define max pooling layer for downsampling
+        self.maxpool = nn.MaxPool2d(2)
+
+        # Define upsampling layer
+        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+        # Define convolutional layers
+        # These are used in the "up" path of the U-Net,
+        # where the image is successively upsampled
+        self.conv_up3 = double_conv(256 + 512, 256)
+        self.conv_up2 = double_conv(128 + 256, 128)
+        self.conv_up1 = double_conv(128 + 64, 64)
+
+        # Define final convolution to output correct number of classes
+        # 1 because there are only two classes (tumor or not tumor)
+        self.last_conv = nn.Conv2d(64, 1, kernel_size=1)
+
+    def forward(self, x):
+        # Forward pass through the network
+
+        # Down path
+        conv1 = self.conv_down1(x)
+        x = self.maxpool(conv1)
+        conv2 = self.conv_down2(x)
+        x = self.maxpool(conv2)
+        conv3 = self.conv_down3(x)
+        x = self.maxpool(conv3)
+        x = self.conv_down4(x)
+
+        # Up path
+        x = self.upsample(x)
+        x = torch.cat([x, conv3], dim=1)
+        x = self.conv_up3(x)
+        x = self.upsample(x)
+        x = torch.cat([x, conv2], dim=1)
+        x = self.conv_up2(x)
+        x = self.upsample(x)
+        x = torch.cat([x, conv1], dim=1)
+        x = self.conv_up1(x)
+
+        # Final output
+        out = self.last_conv(x)
+        out = torch.sigmoid(out)
+
+        return out
+
+unet = UNet().to(device)
+output = unet(torch.randn(1,3,256,256).to(device))
+print("",output.shape)
+
+def dice_coef_metric(inputs, target):
+    intersection = 2.0 * (target * inputs).sum()
+    union = target.sum() + inputs.sum()
+    if target.sum() == 0 and inputs.sum() == 0:
+        return 1.0
+
+    return intersection / union
+
+def dice_coef_loss(inputs, target):
+    smooth = 1.0
+    intersection = 2.0 * ((target * inputs).sum()) + smooth
+    union = target.sum() + inputs.sum() + smooth
+
+    return 1 - (intersection / union)
+
+
+def bce_dice_loss(inputs, target):
+    inputs = inputs.float()
+    target = target.float()
+
+    dicescore = dice_coef_loss(inputs, target)
+    bcescore = nn.BCELoss()
+    bceloss = bcescore(inputs, target)
+
+    return bceloss + dicescore
+
+# loss check
+bce_dice_loss(torch.tensor([0.7, 1., 1.]),
+              torch.tensor([1.,1.,1.]))
+
+from tqdm import tqdm
+
+def train_model(model_name, model, train_loader, val_loader, train_loss, optimizer, lr_scheduler, num_epochs):
+
+    print(model_name)
+    loss_history = []
+    train_history = []
+    val_history = []
+
+    for epoch in range(num_epochs):
+        model.train()  # Enter train mode
+
+        # We store the training loss and dice scores
+        losses = []
+        train_iou = []
+
+        if lr_scheduler:
+            warmup_factor = 1.0 / 100
+            warmup_iters = min(100, len(train_loader) - 1)
+            lr_scheduler = warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor)
+
+        # Add tqdm to the loop (to visualize progress)
+        for i_step, (data, target) in enumerate(tqdm(train_loader, desc=f"Training epoch {epoch+1}/{num_epochs}")):
+            data = data.to(device)
+            target = target.to(device)
+
+            outputs = model(data)
+
+            out_cut = np.copy(outputs.data.cpu().numpy())
+
+            # If the score is less than a threshold (0.5), the prediction is 0, otherwise its 1
+            out_cut[np.nonzero(out_cut < 0.5)] = 0.0
+            out_cut[np.nonzero(out_cut >= 0.5)] = 1.0
+
+            train_dice = dice_coef_metric(out_cut, target.data.cpu().numpy())
+
+            loss = train_loss(outputs, target)
+
+            losses.append(loss.item())
+            train_iou.append(train_dice)
+
+            # Reset the gradients
+            optimizer.zero_grad()
+            # Perform backpropagation to compute gradients
+            loss.backward()
+            # Update the parameters with the computed gradients
+            optimizer.step()
+
+            if lr_scheduler:
+                lr_scheduler.step()
+
+        val_mean_iou = compute_iou(model, val_loader)
+
+        loss_history.append(np.array(losses).mean())
+        train_history.append(np.array(train_iou).mean())
+        val_history.append(val_mean_iou)
+
+        print("Epoch [%d]" % (epoch))
+        print("Mean loss on train:", np.array(losses).mean(),
+              "\nMean DICE on train:", np.array(train_iou).mean(),
+              "\nMean DICE on validation:", val_mean_iou)
+
+    return loss_history, train_history, val_history
+
+def compute_iou(model, loader, threshold=0.3):
+    """
+    Computes accuracy on the dataset wrapped in a loader
+
+    Returns: accuracy as a float value between 0 and 1
+    """
+    #model.eval()
+    valloss = 0
+
+    with torch.no_grad():
+
+        for i_step, (data, target) in enumerate(loader):
+
+            data = data.to(device)
+            target = target.to(device)
+            #prediction = model(x_gpu)
+
+            outputs = model(data)
+           # print("val_output:", outputs.shape)
+
+            out_cut = np.copy(outputs.data.cpu().numpy())
+            out_cut[np.nonzero(out_cut < threshold)] = 0.0
+            out_cut[np.nonzero(out_cut >= threshold)] = 1.0
+
+            picloss = dice_coef_metric(out_cut, target.data.cpu().numpy())
+            valloss += picloss
+
+        #print("Threshold:  " + str(threshold) + "  Validation DICE score:", valloss / i_step)
+
+    return valloss / i_step
+
+unet_optimizer = torch.optim.Adamax(unet.parameters(), lr=1e-3)
+
+# lr_scheduler
+def warmup_lr_scheduler(optimizer, warmup_iters, warmup_factor):
+    def f(x):
+        if x >= warmup_iters:
+            return 1
+        alpha = float(x) / warmup_iters
+        return warmup_factor * (1 - alpha) + alpha
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, f)
+
+%%time
+num_ep = 20
+# Train UNet
+unet_lh, unet_th, unet_vh = train_model("Vanila_UNet", unet, train_dataloader, val_dataloader, bce_dice_loss, unet_optimizer, False, num_epochs = 20)
+
+os.getcwd()
+
+
+# Assuming you have a trained model object named 'model'
+# Specify the path where you want to save the model
+model_path = os.getcwd()
+model_path = os.path.join(model_path, 'unet.pth')  # Use the desired file extension, e.g., 'unet.pth'
+
+# Export and save the model
+torch.save(unet.state_dict(), model_path)
+
+# Instantiate the model class
+unet = UNet().to(device)
+
+# Load the model parameters
+unet.load_state_dict(torch.load("unet.pth",map_location=torch.device('cpu')))
+
+def generate_random_indices(dataset, num_samples):
+    indices = list(range(len(dataset)))
+    random.shuffle(indices)
+    return indices[:num_samples]
+
+import matplotlib.pyplot as plt
+
+# Generate random sample indices from the test set
+num_samples = 3
+sample_indices = generate_random_indices(test_dataset, num_samples)
+
+# Create a subplot with the input images and predictions
+fig, axes = plt.subplots(num_samples, 2, figsize=(10, 10))
+
+for i, idx in enumerate(sample_indices):
+    image, mask = test_dataset[idx]
+    mask = mask[0, :, :]
+    prediction = unet(image.unsqueeze(0).to(device))
+    print(prediction.shape)
+    prediction = prediction[0, 0, :, :].data.cpu().numpy()
+
+    # Plot the input image
+    axes[i, 0].imshow(mask)
+    axes[i, 0].set_title(f"Sample {idx}: Ground Truth")
+
+    # Plot the prediction
+    axes[i, 1].imshow(prediction)
+    axes[i, 1].set_title(f"Sample {idx}: Prediction")
+
+    axes[i, 0].axis("off")
+    axes[i, 1].axis("off")
+
+plt.tight_layout()
+plt.show()
+
