@@ -1,0 +1,70 @@
+# Função para criar o csv, que demora bastante no colab para ser gerado
+
+
+allpaths = glob.glob('gdrive/MyDrive/PPGTIG/VCML/D7torch/FLAIR/*')
+
+# Path to all data
+DATA_PATH = "gdrive/MyDrive/PPGTIG/VCML/D7torch/"
+
+# File path line length images for later sorting
+BASE_LEN = 66 # len(/kaggle/input/lgg-mri-segmentation/kaggle_3m/TCGA_DU_6404_19850629/TCGA_DU_6404_19850629_ <-!!!43.tif)
+END_IMG_LEN = 8 # len(/kaggle/input/lgg-mri-segmentation/kaggle_3m/TCGA_DU_6404_19850629/TCGA_DU_6404_19850629_43 !!!->.tif)
+END_MASK_LEN = 4 # (/kaggle/input/lgg-mri-segmentation/kaggle_3m/TCGA_DU_6404_19850629/TCGA_DU_6404_19850629_43 !!!->_mask.tif)
+
+# img size
+IMG_SIZE = 256
+
+from pathlib import Path
+sub_dirs = [x for x in Path(DATA_PATH).iterdir() if x.is_dir()]
+
+# Initialize a list to store directory and path info
+data_map = []
+
+# Get all subdirectories
+sub_dirs = [x for x in Path(DATA_PATH).iterdir() if x.is_dir()]
+
+# Iterate over subdirectories
+for sub_dir in sub_dirs:
+    # Get all files in subdirectory
+    files = [x for x in sub_dir.iterdir() if x.is_file()]
+
+    # Extend data_map with dirname and path info
+    data_map.extend([[str(sub_dir.name), str(file)] for file in files])
+
+# Create DataFrame
+df = pd.DataFrame(data_map, columns=["dirname", "path"])
+
+# Sanity check
+df.head()
+
+# We create 2 dataframes that contain the paths to the images and masks respectively
+
+# Masks/Not masks
+df_masks = df[~df['path'].str.contains("_0000.png")]
+df_imgs = df[df['path'].str.contains("_0000.png")]
+
+# Data sorting
+imgs = sorted(df_imgs["path"].values, key=lambda x : int(x[BASE_LEN:-END_IMG_LEN]) if x[BASE_LEN:-END_IMG_LEN].isdigit() else 0)
+masks = sorted(df_masks["path"].values, key=lambda x : int(x[BASE_LEN:-END_MASK_LEN]) if x[BASE_LEN:-END_MASK_LEN].isdigit() else 0)
+
+
+# Sanity check
+print(len(imgs), len(masks))
+
+df_imgs
+
+df = pd.DataFrame({"patient": df_imgs.dirname.values,
+                       "image_path": imgs,
+                   "mask_path": masks})
+
+# Adding A/B column for diagnosis
+def positiv_negativ_diagnosis(mask_path):
+    value = np.max(cv2.imread(mask_path))
+    if value > 0 : return 1
+    else: return 0
+
+df["diagnosis"] = df["mask_path"].apply(lambda m: positiv_negativ_diagnosis(m))
+df
+
+df.to_csv('gdrive/MyDrive/PPGTIG/VCML/D7torch/flairdata') # Agora basta carregar esse csv e não precisa fazer tudo de novo
+
