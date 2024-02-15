@@ -1,0 +1,25 @@
+import nibabel as nib
+import numpy as np
+from skimage import measure
+
+def dice_coefficient(prediction, ground_truth):
+    intersection = np.sum(prediction * ground_truth)
+    union = np.sum(prediction) + np.sum(ground_truth)
+
+    if union == 0:
+        return 1.0  # Dice is 1 if both masks are empty
+    else:
+        return 2.0 * intersection / union
+
+# Carregando os dados
+ground_truth_data = nib.load('/caminho/para/a/GT').get_fdata()
+prediction_data = nib.load('/caminho/para/a/predição').get_fdata()
+
+# Binarizando as máscaras
+ground_truth_binary = (ground_truth_data > 0).astype(np.uint8)
+prediction_binary = (prediction_data > 0).astype(np.uint8)
+
+# Calculando o coeficiente Dice
+dice = dice_coefficient(prediction_binary, ground_truth_binary)
+
+print(f'Coeficiente Dice: {dice}')
