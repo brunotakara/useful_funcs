@@ -1,0 +1,119 @@
+import os
+import re
+import numpy as np
+import nibabel as nib
+from skimage.measure import label, regionprops
+
+# Se todos os arquivos estiverem em uma única pasta
+
+def natural_sort_key(s):
+    """
+    Key function for natural sorting.
+    """
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', s)]
+
+def calculate_volumes_in_directory(input_dir, output_file):
+    results = []
+
+    # Lista os arquivos .nii.gz e .nii na pasta de entrada e ordena-os
+    nii_files = sorted([f for f in os.listdir(input_dir) if f.endswith('.nii') or f.endswith('.nii.gz')], key=natural_sort_key)
+    print("Lista de arquivos ordenada:", nii_files)
+
+    # Calcula os volumes para cada arquivo na pasta de entrada
+    for nii_file in nii_files:
+        nii_path = os.path.join(input_dir, nii_file)
+        total_volume, mean_cluster_volume = calculate_volume(nii_path)
+        results.append((total_volume, mean_cluster_volume))
+
+    # Escreve os resultados em um arquivo de texto
+    with open(output_file, "w") as f:
+        # Escreve os títulos das colunas
+        f.write("Volume Total (cc)\tVolume Médio dos Clusters (cc)\n")
+
+        # Escreve os valores correspondentes às colunas, substituindo pontos por vírgulas
+        for total_volume, mean_cluster_volume in results:
+            f.write(f"{total_volume:.2f}\t{mean_cluster_volume:.2f}\n".replace('.', ','))
+
+def calculate_volume(nii_file):
+    img = nib.load(nii_file)
+    data = img.get_fdata()
+    voxel_size = np.prod(img.header.get_zooms())  # Calcula o tamanho do voxel em mm³
+    voxel_volume_cc = voxel_size / 1000  # Converte o tamanho do voxel para cc (1 mm³ = 0.001 cc)
+
+    mask = (data != 0).astype(int)
+    labeled_mask, num_clusters = label(mask, connectivity=1, return_num=True)
+
+    total_volume = np.sum(mask) * voxel_volume_cc  # Calcula o volume total da máscara em cc
+    mean_cluster_volume = total_volume / num_clusters if num_clusters != 0 else 0  # Calcula o volume médio dos clusters em cc
+
+    return total_volume, mean_cluster_volume
+
+# Diretório de entrada e arquivo de saída
+input_dir = path\ to\ dir
+output_file = path\ to\ file
+
+# Calcula os volumes e escreve os resultados no arquivo de texto
+calculate_volumes_in_directory(input_dir, output_file)
+
+
+# Caso hajam subpastas com os arquivos, dentro da pasta principal
+def calculate_volumes_in_directory(input_dir, output_file):
+    results = []
+
+    # Percorre todas as subpastas na pasta principal
+    for root, dirs, files in os.walk(input_dir):
+        for dir_name in dirs:
+            subfolder_path = os.path.join(root, dir_name)
+            total_volume, mean_cluster_volume = calculate_volumes(subfolder_path)
+            results.append((total_volume, mean_cluster_volume))
+
+    # Escreve os resultados em um arquivo de texto
+    with open(output_file, "w") as f:
+        # Escreve os títulos das colunas
+        f.write("Volume Total (cc)\tVolume Médio dos Clusters (cc)\n")
+
+        # Escreve os valores correspondentes às colunas, substituindo pontos por vírgulas
+        for total_volume, mean_cluster_volume in results:
+            f.write(f"{total_volume:.2f}\t{mean_cluster_volume:.2f}\n".replace('.', ','))
+
+def calculate_volumes(subfolder_path):
+    # Lista os arquivos .nii.gz e .nii na subpasta
+    nii_files = [f for f in os.listdir(subfolder_path) if f.endswith('.nii') or f.endswith('.nii.gz')]
+
+    total_volume_sum = 0
+    mean_cluster_volume_sum = 0
+
+    # Calcula os volumes para cada arquivo na subpasta
+    for nii_file in nii_files:
+        nii_path = os.path.join(subfolder_path, nii_file)
+        total_volume, mean_cluster_volume = calculate_volume(nii_path)
+        total_volume_sum += total_volume
+        mean_cluster_volume_sum += mean_cluster_volume
+
+    # Calcula a média dos volumes
+    num_files = len(nii_files)
+    total_volume_avg = total_volume_sum / num_files if num_files != 0 else 0
+    mean_cluster_volume_avg = mean_cluster_volume_sum / num_files if num_files != 0 else 0
+
+    return total_volume_avg, mean_cluster_volume_avg
+
+def calculate_volume(nii_file):
+    img = nib.load(nii_file)
+    data = img.get_fdata()
+    voxel_size = np.prod(img.header.get_zooms())  # Calcula o tamanho do voxel em mm³
+    voxel_volume_cc = voxel_size / 1000  # Converte o tamanho do voxel para cc (1 mm³ = 0.001 cc)
+
+    mask = (data != 0).astype(int)
+    labeled_mask, num_clusters = label(mask, connectivity=1, return_num=True)
+
+    total_volume = np.sum(mask) * voxel_volume_cc  # Calcula o volume total da máscara em cc
+    mean_cluster_volume = total_volume / num_clusters if num_clusters != 0 else 0  # Calcula o volume médio dos clusters em cc
+
+    return total_volume, mean_cluster_volume
+
+# Diretório de entrada e arquivo de saída
+input_dir = path\ to\ dir
+output_file = path\ to\ file
+
+# Calcula os volumes e escreve os resultados no arquivo de texto
+calculate_volumes_in_directory(input_dir, output_file)
