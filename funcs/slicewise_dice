@@ -1,0 +1,70 @@
+import nibabel as nib
+import numpy as np
+import os
+
+diretorio = 'path\ to\ folder\ with\ files'
+
+arquivos = os.listdir(diretorio)
+arquivos = sorted(arquivos)
+
+def dice_coefficient(prediction, ground_truth):
+    intersection = np.sum(prediction[ground_truth == 1])
+    total = np.sum(prediction) + np.sum(ground_truth)
+    if total == 0:
+        return 1.00001 # Para diferenciar dos casos em que acerta foi adicionado um fator de 0.00001
+    else:
+        return 2.0 * intersection / total
+
+def slicewise_dice_BG_noBG(prediction_nifti_file, ground_truth_nifti_file):
+    prediction_nifti = nib.load(prediction_nifti_file)
+    ground_truth_nifti = nib.load(ground_truth_nifti_file)
+
+    prediction_data = prediction_nifti.get_fdata()
+    ground_truth_data = ground_truth_nifti.get_fdata()
+
+    num_slices = prediction_data.shape[0] # num_slices = prediction_data.shape[0] Vai depender do shape do arquivo se é (slice, X, Y) ou (X, Y, slice
+
+
+    # Sanity check: para os arquivos do brainmetshare está na primeira dimensão [0], e para os arquivos do BRATS está na última dimensão [-1]
+    dice_scores = []
+
+    # Precisa trocar a posição do slice_idx nesse loop também, dependendo da posição em que estiver o eixo transversal no arquivo:
+    for slice_idx in range(num_slices):
+        prediction_slice = np.where(prediction_data[slice_idx, ...] > 0, 1, 0) # OU np.where(prediction_data[slice_idx, ...] > 0, 1, 0)
+        ground_truth_slice = np.where(ground_truth_data[slice_idx, ...] > 0, 1, 0) # OU np.where(prediction_data[slice_idx, ...] > 0, 1, 0)
+
+        dice_score = dice_coefficient(prediction_slice, ground_truth_slice)
+        dice_scores.append(dice_score)
+
+    # mean Dice com remoção dos slices que só possuem verdadeiros negativos (com valor de 1.00001)
+    valid_dice_scores = [dice for dice in dice_scores if dice != 1.00001]
+    mean_dice_noBG = np.mean(valid_dice_scores)
+    mean_dice = np.mean(dice_scores)
+
+    return mean_dice, mean_dice_noBG
+
+# Verificar qual o formato do arquivo, para poder trocar as variáveis da função slicewise_dice_BG_noBG em relação à posição da dimensão Z do slice
+
+modality = 'Only_T1_post'  # É o nome da pasta em Missing_Modalities
+
+# Armazenar os valores de DSC em um txt para uso futuro
+with open(f'\caminho\ para\ os\ arquivos/{modality}/{modality}_slicewise_DSCs_BG_noBG.txt', 'w') as arquivo:
+  arquivo.write("")
+
+# Sanity check: para os arquivos do brainmetshare está na primeira dimensão [0], e para os arquivos do BRATS está na última dimensão [-1]
+
+for pat in range(1, len(arquivos) + 1):
+  prediction_nifti_path f'\caminho\ para\ as\ predicoes/{modality}/{modality}_preds/Scan_{pat:03}/Scan_{pat:03}.nii.gz'
+  ground_truth_nifti_path = f'\caminho\ para\ GT/{modality}/Scan_{pat:03}/Scan_{pat:03}.nii.gz'
+
+  mean_DSC_BG, mean_DSC_noBG = slicewise_dice_BG_noBG(prediction_nifti_path, ground_truth_nifti_path)
+
+  print(f"Slicewise DSC - Scan {pat:03}:")
+  print(f"BG: {mean_DSC_BG}")
+  print(f"noBG: {mean_DSC_noBG}")
+
+  with open(f'\caminho\ para\ os\ arquivos/{modality}/{modality}_slicewise_DSCs_BG_noBG.txt', 'a') as arquivo:
+    dsc_bg = str(mean_DSC_BG).replace('.', ',') # Remover replace se quiser os separador ponto para os números decimais
+    dsc_nobg = str(mean_DSC_noBG).replace('.', ',') # Remover replace se quiser os separador ponto para os números decimais 
+    arquivo.write(dsc_bg + '\t' + dsc_nobg + '\n')
+
